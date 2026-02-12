@@ -1,0 +1,53 @@
+# KiCAD backup files
+*.bak
+*.backup
+*~
+*.kicad_pcb-bak
+*.sch-bak
+*.kicad_sch-bak
+*-backups/
+
+# KiCAD cache
+fp-info-cache
+
+# PlatformIO
+.pio/
+.platformio/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# Local development/agent files
+CLAUDE.md
+.claude/
+
+# Build outputs (not needed in repo)
+gerber/
+drill/
+fab/
+*.gbr
+*.gbl
+*.gts
+*.gto
+*.xln
+
+# Temporary/backup files
+*.orig
+*.tmp
+.~*
+
+# CRITICAL: Secrets - never commit credentials
+src/Secrets.cpp
+src/Secrets.cpp.template
+src/Secrets.h
+src/secrets.h
+src/Secrets.H
