@@ -41,13 +41,13 @@ This project is a standalone GNSS module that utilizes the DFRobot Gravity GNSS 
 
 ### KiCAD Library Dependencies
 
-This project uses the consolidated [TrailCurrentKiCADLibraries](https://codeberg.org/trailcurrent/TrailCurrentKiCADLibraries).
+This project uses the consolidated [TrailCurrentKiCADLibraries](https://codeberg.org/trailcurrentopensource/TrailCurrentKiCADLibraries).
 
 **Setup:**
 
 ```bash
 # Clone the library
-git clone https://codeberg.org/trailcurrent/TrailCurrentKiCADLibraries.git
+git clone https://codeberg.org/trailcurrentopensource/TrailCurrentKiCADLibraries.git
 
 # Set environment variables (add to ~/.bashrc or ~/.zshrc)
 export TRAILCURRENT_SYMBOL_DIR="/path/to/TrailCurrentKiCADLibraries/symbols"
@@ -55,7 +55,7 @@ export TRAILCURRENT_FOOTPRINT_DIR="/path/to/TrailCurrentKiCADLibraries/footprint
 export TRAILCURRENT_3DMODEL_DIR="/path/to/TrailCurrentKiCADLibraries/3d_models"
 ```
 
-See [KICAD_ENVIRONMENT_SETUP.md](https://codeberg.org/trailcurrent/TrailCurrentKiCADLibraries/blob/main/KICAD_ENVIRONMENT_SETUP.md) in the library repository for detailed setup instructions.
+See [KICAD_ENVIRONMENT_SETUP.md](https://codeberg.org/trailcurrentopensource/TrailCurrentKiCADLibraries/blob/main/KICAD_ENVIRONMENT_SETUP.md) in the library repository for detailed setup instructions.
 
 ## Opening the Project
 
@@ -107,7 +107,7 @@ Configure the desired mode in firmware initialization. Multi-constellation modes
 - **PCB Files:** Ready for fabrication via standard PCB services (JLCPCB, OSH Park, etc.)
 - **BOM Generation:** Export BOM from KiCAD schematic (Tools → Generate BOM)
 - **JLCPCB Assembly:** This project supports automated assembly using JLCPCB
-  - See [BOM_ASSEMBLY_WORKFLOW.md](https://codeberg.org/trailcurrent/TrailCurrentKiCADLibraries/blob/main/BOM_ASSEMBLY_WORKFLOW.md) for detailed assembly workflow
+  - See [BOM_ASSEMBLY_WORKFLOW.md](https://codeberg.org/trailcurrentopensource/TrailCurrentKiCADLibraries/blob/main/BOM_ASSEMBLY_WORKFLOW.md) for detailed assembly workflow
   - Component library includes LCSC, Mouser, and DigiKey part numbers for flexible sourcing
 
 ## Project Structure
@@ -140,6 +140,6 @@ Improvements and contributions are welcome! Please submit issues or pull request
 ## Support
 
 For questions about:
-- **KiCAD setup:** See [KICAD_ENVIRONMENT_SETUP.md](https://codeberg.org/trailcurrent/TrailCurrentKiCADLibraries/blob/main/KICAD_ENVIRONMENT_SETUP.md)
-- **Library consolidation:** See [CONNECTOR_CONSOLIDATION_SUMMARY.md](https://codeberg.org/trailcurrent/TrailCurrentKiCADLibraries/blob/main/CONNECTOR_CONSOLIDATION_SUMMARY.md)
-- **Assembly workflow:** See [BOM_ASSEMBLY_WORKFLOW.md](https://codeberg.org/trailcurrent/TrailCurrentKiCADLibraries/blob/main/BOM_ASSEMBLY_WORKFLOW.md)
+- **KiCAD setup:** See [KICAD_ENVIRONMENT_SETUP.md](https://codeberg.org/trailcurrentopensource/TrailCurrentKiCADLibraries/blob/main/KICAD_ENVIRONMENT_SETUP.md)
+- **Library consolidation:** See [CONNECTOR_CONSOLIDATION_SUMMARY.md](https://codeberg.org/trailcurrentopensource/TrailCurrentKiCADLibraries/blob/main/CONNECTOR_CONSOLIDATION_SUMMARY.md)
+- **Assembly workflow:** See [BOM_ASSEMBLY_WORKFLOW.md](https://codeberg.org/trailcurrentopensource/TrailCurrentKiCADLibraries/blob/main/BOM_ASSEMBLY_WORKFLOW.md)
