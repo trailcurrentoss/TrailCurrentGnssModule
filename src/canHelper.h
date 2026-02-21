@@ -3,11 +3,26 @@
 #include <stdint.h>
 #include "globals.h"
 #include "driver/twai.h"
+#include <OtaUpdate.h>
+#include <Preferences.h>
 
 #define CAN_RX 13
 #define CAN_TX 15
 #define POLLING_RATE_MS 100
 static bool driver_installed = false;
+
+// Forward declaration for OTA handler
+extern OtaUpdate otaUpdate;
+
+// WiFi credential reception state (CAN ID 0x01 protocol)
+static bool wifiConfigInProgress = false;
+static uint8_t wifiSsidBuffer[33];       // Max 32 chars + null
+static uint8_t wifiPasswordBuffer[64];   // Max 63 chars + null
+static uint8_t wifiSsidLen = 0;
+static uint8_t wifiPasswordLen = 0;
+static uint8_t wifiSsidReceived = 0;
+static uint8_t wifiPasswordReceived = 0;
+
 #define CAN_SEND_MESSAGE_LATLON_IDENTIFIER 0x009;
 #define CAN_SEND_MESSAGE_DATETIME_IDENTIFIER 0x006;
 #define CAN_SEND_MESSAGE_SATNUM_SPEED_COURSE_GNSSMODE_IDENTIFIER 0x007;
@@ -19,13 +34,14 @@ namespace canHelper
     {
         twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)CAN_TX, (gpio_num_t)CAN_RX, TWAI_MODE_NO_ACK);
         twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS(); // Look in the api-reference for other speed sets.
-        // THIS IS A FILTER THAT ENSURES TRANSMIT ONLY
+        // Hardware filter: accept only CAN IDs 0x00 (OTA trigger) and 0x01 (WiFi config)
+        // Single filter, standard frame layout: [31:22]=ID[10:1], [21]=ID[0], [20]=RTR, [19:0]=data
+        // Mask: 0=must match, 1=don't care. ID[10:1] must be 0, ID[0] is don't care
         twai_filter_config_t f_config = {
-            .acceptance_code = 0xFFFFFFFF, // Base ID = 0
-            .acceptance_mask = 0x00000000, // Match exactly against the mask
-            .single_filter = true          // Single filter mode
+            .acceptance_code = 0x00000000,
+            .acceptance_mask = 0x003FFFFF,  // Don't care: ID[0], RTR, data bytes
+            .single_filter = true
         };
-        // twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
         //  Install TWAI driver
         if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK)
         {
@@ -48,11 +64,148 @@ namespace canHelper
             return;
         }
 
-        // Note: Receive queue clearing not implemented as this is transmit-only device
-        // The CAN filter is configured to reject all incoming messages to prevent queue buildup
+        // Configure alerts for RX data
+        uint32_t alerts_to_enable = TWAI_ALERT_RX_DATA | TWAI_ALERT_ERR_PASS | TWAI_ALERT_BUS_ERROR | TWAI_ALERT_RX_QUEUE_FULL;
+        if (twai_reconfigure_alerts(alerts_to_enable, NULL) == ESP_OK)
+        {
+            debugln("CAN alerts configured");
+        }
+        else
+        {
+            debugln("Failed to configure CAN alerts");
+            return;
+        }
 
         // TWAI driver is now successfully installed and started
         driver_installed = true;
+    }
+
+    static void saveWifiCredentials(const char* ssid, const char* password) {
+        Preferences prefs;
+        prefs.begin("wifi", false);  // read-write
+        prefs.putString("ssid", ssid);
+        prefs.putString("password", password);
+        prefs.end();
+        debugf("[WiFi] Credentials saved to NVS (SSID: %s)\n", ssid);
+    }
+
+    static void handleWifiConfigMessage(twai_message_t &message) {
+        uint8_t msgType = message.data[0];
+
+        switch (msgType) {
+            case 0x01: {  // Start message
+                wifiSsidLen = message.data[1];
+                wifiPasswordLen = message.data[2];
+                wifiSsidReceived = 0;
+                wifiPasswordReceived = 0;
+                memset(wifiSsidBuffer, 0, sizeof(wifiSsidBuffer));
+                memset(wifiPasswordBuffer, 0, sizeof(wifiPasswordBuffer));
+                wifiConfigInProgress = true;
+                debugf("[WiFi] Config start: SSID len=%d, Password len=%d\n", wifiSsidLen, wifiPasswordLen);
+                break;
+            }
+
+            case 0x02: {  // SSID chunk
+                if (!wifiConfigInProgress) break;
+                uint8_t dataBytes = message.data_length_code - 2;
+                uint8_t remaining = wifiSsidLen - wifiSsidReceived;
+                if (dataBytes > remaining) dataBytes = remaining;
+                if (wifiSsidReceived + dataBytes <= 32) {
+                    memcpy(wifiSsidBuffer + wifiSsidReceived, &message.data[2], dataBytes);
+                    wifiSsidReceived += dataBytes;
+                }
+                break;
+            }
+
+            case 0x03: {  // Password chunk
+                if (!wifiConfigInProgress) break;
+                uint8_t dataBytes = message.data_length_code - 2;
+                uint8_t remaining = wifiPasswordLen - wifiPasswordReceived;
+                if (dataBytes > remaining) dataBytes = remaining;
+                if (wifiPasswordReceived + dataBytes <= 63) {
+                    memcpy(wifiPasswordBuffer + wifiPasswordReceived, &message.data[2], dataBytes);
+                    wifiPasswordReceived += dataBytes;
+                }
+                break;
+            }
+
+            case 0x04: {  // End message with checksum
+                if (!wifiConfigInProgress) break;
+                wifiConfigInProgress = false;
+
+                uint8_t checksum = 0;
+                for (uint8_t i = 0; i < wifiSsidReceived; i++) checksum ^= wifiSsidBuffer[i];
+                for (uint8_t i = 0; i < wifiPasswordReceived; i++) checksum ^= wifiPasswordBuffer[i];
+
+                if (checksum == message.data[1] && wifiSsidReceived == wifiSsidLen && wifiPasswordReceived == wifiPasswordLen) {
+                    wifiSsidBuffer[wifiSsidReceived] = '\0';
+                    wifiPasswordBuffer[wifiPasswordReceived] = '\0';
+                    saveWifiCredentials((const char*)wifiSsidBuffer, (const char*)wifiPasswordBuffer);
+                } else {
+                    debugf("[WiFi] Config failed: checksum %s, SSID %d/%d bytes, Password %d/%d bytes\n",
+                           (checksum == message.data[1]) ? "OK" : "MISMATCH",
+                           wifiSsidReceived, wifiSsidLen, wifiPasswordReceived, wifiPasswordLen);
+                }
+                break;
+            }
+        }
+    }
+
+    static void handleRxMessage(twai_message_t &message) {
+        // OTA trigger message (ID 0x0)
+        if (message.identifier == 0x0) {
+            debugln("[OTA] CAN trigger received");
+
+            String currentHostName = otaUpdate.getHostName();
+
+            char targetHostName[14];
+            sprintf(targetHostName, "esp32-%02X%02X%02X",
+                    message.data[0], message.data[1], message.data[2]);
+
+            debugf("[OTA] Target hostname:  '%s'\n", targetHostName);
+            debugf("[OTA] Current hostname: '%s'\n", currentHostName.c_str());
+
+            if (currentHostName.equals(targetHostName)) {
+                debugln("[OTA] Hostname matched - reading WiFi credentials from NVS");
+                Preferences prefs;
+                prefs.begin("wifi", true);  // read-only
+                String ssid = prefs.getString("ssid", "");
+                String password = prefs.getString("password", "");
+                prefs.end();
+
+                if (ssid.length() > 0 && password.length() > 0) {
+                    debugf("[OTA] Using stored WiFi credentials (SSID: %s)\n", ssid.c_str());
+                    OtaUpdate ota(180000, ssid.c_str(), password.c_str());
+                    ota.waitForOta();
+                    debugln("[OTA] OTA mode exited - resuming normal operation");
+                } else {
+                    debugln("[OTA] ERROR: No WiFi credentials in NVS - cannot start OTA");
+                }
+            } else {
+                debugln("[OTA] Hostname mismatch - ignoring OTA trigger");
+            }
+            return;
+        }
+
+        // WiFi credential configuration message (ID 0x01)
+        if (message.identifier == 0x01) {
+            handleWifiConfigMessage(message);
+            return;
+        }
+    }
+
+    void checkForIncomingMessages() {
+        if (!driver_installed) return;
+
+        uint32_t alerts_triggered;
+        twai_read_alerts(&alerts_triggered, pdMS_TO_TICKS(0));
+
+        if (alerts_triggered & TWAI_ALERT_RX_DATA) {
+            twai_message_t message;
+            while (twai_receive(&message, 0) == ESP_OK) {
+                handleRxMessage(message);
+            }
+        }
     }
 
     uint8_t latBytes[4];

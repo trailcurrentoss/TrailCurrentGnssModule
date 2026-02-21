@@ -1,6 +1,10 @@
 #include "globals.h"
 #include "i2cGps.h"
 #include "canHelper.h"
+#include <OtaUpdate.h>
+
+// OTA update handler (3-minute timeout, credentials loaded from NVS at trigger time)
+OtaUpdate otaUpdate(180000, "", "");
 
 uint16_t currentYear = 0;
 uint8_t currentMonth = 0;
@@ -29,6 +33,9 @@ void setup()
 
 void loop()
 {
+  // Check for incoming CAN messages (OTA trigger, WiFi config)
+  canHelper::checkForIncomingMessages();
+
   currentUpdateMillis = millis();
   if (currentUpdateMillis - updateStartMillis >= updateIntervalMillis)
   {
