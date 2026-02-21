@@ -2,14 +2,12 @@
 #include <Arduino.h>
 #include <stdint.h>
 #include "globals.h"
-#include "driver/twai.h"
+#include <TwaiTaskBased.h>
 #include <OtaUpdate.h>
 #include <Preferences.h>
 
 #define CAN_RX 13
 #define CAN_TX 15
-#define POLLING_RATE_MS 100
-static bool driver_installed = false;
 
 // Forward declaration for OTA handler
 extern OtaUpdate otaUpdate;
@@ -23,64 +21,14 @@ static uint8_t wifiPasswordLen = 0;
 static uint8_t wifiSsidReceived = 0;
 static uint8_t wifiPasswordReceived = 0;
 
-#define CAN_SEND_MESSAGE_LATLON_IDENTIFIER 0x009;
-#define CAN_SEND_MESSAGE_DATETIME_IDENTIFIER 0x006;
-#define CAN_SEND_MESSAGE_SATNUM_SPEED_COURSE_GNSSMODE_IDENTIFIER 0x007;
-#define CAN_SEND_MESSAGE_ALTITUDE_IDENTIFIER 0x008;
+#define CAN_SEND_MESSAGE_LATLON_IDENTIFIER 0x009
+#define CAN_SEND_MESSAGE_DATETIME_IDENTIFIER 0x006
+#define CAN_SEND_MESSAGE_SATNUM_SPEED_COURSE_GNSSMODE_IDENTIFIER 0x007
+#define CAN_SEND_MESSAGE_ALTITUDE_IDENTIFIER 0x008
 
 namespace canHelper
 {
-    void setup()
-    {
-        twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)CAN_TX, (gpio_num_t)CAN_RX, TWAI_MODE_NO_ACK);
-        twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS(); // Look in the api-reference for other speed sets.
-        // Hardware filter: accept only CAN IDs 0x00 (OTA trigger) and 0x01 (WiFi config)
-        // Single filter, standard frame layout: [31:22]=ID[10:1], [21]=ID[0], [20]=RTR, [19:0]=data
-        // Mask: 0=must match, 1=don't care. ID[10:1] must be 0, ID[0] is don't care
-        twai_filter_config_t f_config = {
-            .acceptance_code = 0x00000000,
-            .acceptance_mask = 0x003FFFFF,  // Don't care: ID[0], RTR, data bytes
-            .single_filter = true
-        };
-        //  Install TWAI driver
-        if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK)
-        {
-            debugln("Driver installed");
-        }
-        else
-        {
-            debugln("Failed to install driver");
-            return;
-        }
-
-        // Start TWAI driver
-        if (twai_start() == ESP_OK)
-        {
-            debugln("Driver started");
-        }
-        else
-        {
-            debugln("Failed to start driver");
-            return;
-        }
-
-        // Configure alerts for RX data
-        uint32_t alerts_to_enable = TWAI_ALERT_RX_DATA | TWAI_ALERT_ERR_PASS | TWAI_ALERT_BUS_ERROR | TWAI_ALERT_RX_QUEUE_FULL;
-        if (twai_reconfigure_alerts(alerts_to_enable, NULL) == ESP_OK)
-        {
-            debugln("CAN alerts configured");
-        }
-        else
-        {
-            debugln("Failed to configure CAN alerts");
-            return;
-        }
-
-        // TWAI driver is now successfully installed and started
-        driver_installed = true;
-    }
-
-    static void saveWifiCredentials(const char* ssid, const char* password) {
+    void saveWifiCredentials(const char* ssid, const char* password) {
         Preferences prefs;
         prefs.begin("wifi", false);  // read-write
         prefs.putString("ssid", ssid);
@@ -89,7 +37,7 @@ namespace canHelper
         debugf("[WiFi] Credentials saved to NVS (SSID: %s)\n", ssid);
     }
 
-    static void handleWifiConfigMessage(twai_message_t &message) {
+    void handleWifiConfigMessage(const twai_message_t &message) {
         uint8_t msgType = message.data[0];
 
         switch (msgType) {
@@ -101,7 +49,7 @@ namespace canHelper
                 memset(wifiSsidBuffer, 0, sizeof(wifiSsidBuffer));
                 memset(wifiPasswordBuffer, 0, sizeof(wifiPasswordBuffer));
                 wifiConfigInProgress = true;
-                debugf("[WiFi] Config start: SSID len=%d, Password len=%d\n", wifiSsidLen, wifiPasswordLen);
+                debugg("[WiFi] Config start: SSID len=%d, Password len=%d\n", wifiSsidLen, wifiPasswordLen);
                 break;
             }
 
@@ -142,16 +90,17 @@ namespace canHelper
                     wifiPasswordBuffer[wifiPasswordReceived] = '\0';
                     saveWifiCredentials((const char*)wifiSsidBuffer, (const char*)wifiPasswordBuffer);
                 } else {
-                    debugf("[WiFi] Config failed: checksum %s, SSID %d/%d bytes, Password %d/%d bytes\n",
-                           (checksum == message.data[1]) ? "OK" : "MISMATCH",
-                           wifiSsidReceived, wifiSsidLen, wifiPasswordReceived, wifiPasswordLen);
+                    debugf("[WiFi] Config failed: checksum %s\n",
+                           (checksum == message.data[1]) ? "OK" : "MISMATCH");
+                    debugg("[WiFi]   SSID %d/%d bytes\n", wifiSsidReceived, wifiSsidLen);
+                    debugg("[WiFi]   Password %d/%d bytes\n", wifiPasswordReceived, wifiPasswordLen);
                 }
                 break;
             }
         }
     }
 
-    static void handleRxMessage(twai_message_t &message) {
+    static void handle_rx_message(const twai_message_t &message) {
         // OTA trigger message (ID 0x0)
         if (message.identifier == 0x0) {
             debugln("[OTA] CAN trigger received");
@@ -194,18 +143,22 @@ namespace canHelper
         }
     }
 
-    void checkForIncomingMessages() {
-        if (!driver_installed) return;
+    static void handle_tx_result(bool success) {
+        debugf("[CAN] TX %s\n", success ? "OK" : "FAILED");
+    }
 
-        uint32_t alerts_triggered;
-        twai_read_alerts(&alerts_triggered, pdMS_TO_TICKS(0));
-
-        if (alerts_triggered & TWAI_ALERT_RX_DATA) {
-            twai_message_t message;
-            while (twai_receive(&message, 0) == ESP_OK) {
-                handleRxMessage(message);
-            }
+    void setupCan()
+    {
+        if (TwaiTaskBased::begin((gpio_num_t)CAN_TX, (gpio_num_t)CAN_RX, 500000, TWAI_MODE_NO_ACK)) {
+            debugln("[CAN] Driver initialized");
+        } else {
+            debugln("[CAN] Failed to initialize driver");
+            return;
         }
+
+        TwaiTaskBased::onReceive(handle_rx_message);
+        TwaiTaskBased::onTransmit(handle_tx_result);
+        debugln("[CAN] RX/TX callbacks registered");
     }
 
     uint8_t latBytes[4];
@@ -320,14 +273,10 @@ namespace canHelper
 
     void sendDateTimeCanMessage(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second)
     {
-        if (!driver_installed)
-        {
-            debugln("TWAI driver not installed, cannot send message");
-            return;
-        }
-
         twai_message_t message;
         message.identifier = CAN_SEND_MESSAGE_DATETIME_IDENTIFIER;
+        message.extd = false;
+        message.rtr = false;
         message.data_length_code = 7;
         message.data[0] = (year >> 8) & 0xFF;
         message.data[1] = year & 0xFF;
@@ -336,111 +285,63 @@ namespace canHelper
         message.data[4] = hour;
         message.data[5] = minute;
         message.data[6] = second;
-        message.flags = TWAI_MSG_FLAG_NONE;
 
-        // Transmit message
-        if (twai_transmit(&message, pdMS_TO_TICKS(1000)) == ESP_OK)
-        {
-            // debugln("Date/Time CAN message sent");
-        }
-        else
-        {
-            debugln("Failed to send Date/Time CAN message");
-        }
+        TwaiTaskBased::send(message, pdMS_TO_TICKS(10));
     }
 
     void sendLatLonCanMessage(float latitude, float longitude)
     {
-        if (!driver_installed)
-        {
-            debugln("TWAI driver not installed, cannot send message");
-            return;
-        }
-
         formatLatLongData(latitude, longitude);
 
         twai_message_t message;
         message.identifier = CAN_SEND_MESSAGE_LATLON_IDENTIFIER;
+        message.extd = false;
+        message.rtr = false;
         message.data_length_code = 8;
         memcpy(message.data, latLonByteAry, 8);
-        message.flags = TWAI_MSG_FLAG_NONE;
 
-        // Transmit message
-        if (twai_transmit(&message, pdMS_TO_TICKS(1000)) == ESP_OK)
-        {
-            debugln("Lat/Lon CAN message sent");
-        }
-        else
-        {
-            debugln("Failed to send Lat/Lon CAN message");
-        }
+        TwaiTaskBased::send(message, pdMS_TO_TICKS(10));
     }
 
     void sendSatSpeedCourseAndModeMessage(uint8_t numSatUsed, double speedOverGround, double courseOverGround, uint8_t gnssMode)
     {
-        if (!driver_installed)
-        {
-            debugln("TWAI driver not installed, cannot send message");
-            return;
-        }
-
         twai_message_t message;
         message.identifier = CAN_SEND_MESSAGE_SATNUM_SPEED_COURSE_GNSSMODE_IDENTIFIER;
+        message.extd = false;
+        message.rtr = false;
         message.data_length_code = 6;
         message.data[0] = numSatUsed;
-        
+
         // Format and send speed over ground (scaled by 100)
         uint16_t speedScaled = (uint16_t)(speedOverGround * 100.0);
         message.data[1] = (speedScaled >> 8) & 0xFF;
         message.data[2] = speedScaled & 0xFF;
-        
+
         // Format and send course over ground (scaled by 10)
         uint16_t courseScaled = (uint16_t)(courseOverGround * 10.0 + 0.5);
         message.data[3] = (courseScaled >> 8) & 0xFF;
         message.data[4] = courseScaled & 0xFF;
         // Debug output to verify course over ground values (minimal)
         debuglnf(courseOverGround, 1);
-        
-        message.data[5] = gnssMode;
-        message.flags = TWAI_MSG_FLAG_NONE;
 
-        // Transmit message
-        if (twai_transmit(&message, pdMS_TO_TICKS(1000)) == ESP_OK)
-        {
-            debugln("Sat/Speed/Course/GNSSMode CAN message sent");
-        }
-        else
-        {
-            debugln("Failed to send Sat/Speed/Course/GNSSMode CAN message");
-        }
+        message.data[5] = gnssMode;
+
+        TwaiTaskBased::send(message, pdMS_TO_TICKS(10));
     }
 
     void sendAltitudeDate(double altitude)
     {
-        if (!driver_installed)
-        {
-            debugln("TWAI driver not installed, cannot send message");
-            return;
-        }
-
         twai_message_t message;
         message.identifier = CAN_SEND_MESSAGE_ALTITUDE_IDENTIFIER;
+        message.extd = false;
+        message.rtr = false;
         message.data_length_code = 4;
         message.data[0] = altitudeByteAry[0];
         message.data[1] = altitudeByteAry[1];
         message.data[2] = altitudeByteAry[2];
         message.data[3] = altitudeByteAry[3];
-        message.flags = TWAI_MSG_FLAG_NONE;
 
-        // Transmit message
-        if (twai_transmit(&message, pdMS_TO_TICKS(1000)) == ESP_OK)
-        {
-            // debugln("Course Over Ground CAN message sent");
-        }
-        else
-        {
-            // debugln("Failed to send Course Over Ground CAN message");
-        }
+        TwaiTaskBased::send(message, pdMS_TO_TICKS(10));
     }
 
     void sendGnssData(

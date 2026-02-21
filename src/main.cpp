@@ -28,13 +28,12 @@ void setup()
 {
   Serial.begin(115200);
   i2cGps::setup();
-  canHelper::setup();
+  canHelper::setupCan();
 }
 
 void loop()
 {
-  // Check for incoming CAN messages (OTA trigger, WiFi config)
-  canHelper::checkForIncomingMessages();
+  // RX is handled asynchronously by TwaiTaskBased FreeRTOS task
 
   currentUpdateMillis = millis();
   if (currentUpdateMillis - updateStartMillis >= updateIntervalMillis)
