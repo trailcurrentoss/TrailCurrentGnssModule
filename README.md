@@ -4,7 +4,7 @@ GNSS (Global Navigation Satellite System) module for precise positioning, timing
 
 ## Project Overview
 
-This project is a standalone GNSS module that utilizes the DFRobot Gravity GNSS receiver. The data that comes in is formatted and sent over the CAN bus for other modules to use.
+TrailCurrent Bearing is a standalone GNSS module that utilizes the DFRobot Gravity GNSS receiver. The data that comes in is formatted and sent over the CAN bus for other modules to use.
 
 **Example Use Cases:**
 - Digital clocks with precise time synchronization
