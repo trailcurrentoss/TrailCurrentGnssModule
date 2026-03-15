@@ -1,4 +1,4 @@
-# TrailCurrent GPS Module
+# TrailCurrent Bearing
 
 GNSS (Global Navigation Satellite System) module for precise positioning, timing, and navigation. Part of the [TrailCurrent](https://trailcurrent.com) open-source vehicle platform.
 
